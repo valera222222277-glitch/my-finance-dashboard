@@ -10,6 +10,8 @@ import requests
 import datetime # <--- ДОБАВИТЬ ЭТО
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from streamlit_calendar import calendar
+import datetime
 
 # --- Настройка страницы ---
 st.set_page_config(page_title="Мой Капитал", layout="wide", page_icon="💰")
@@ -45,37 +47,24 @@ except:
     TBANK_TOKEN = None
 
 def get_coupons_for_bond(figi, from_date, to_date):
-    """Запрашивает купоны по облигации через API Т-Банка"""
     url = "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondCoupons"
-    headers = {
-        "Authorization": f"Bearer {TBANK_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "instrumentId": figi,
-        "from": from_date + "T00:00:00Z",
-        "to": to_date + "T23:59:59Z"
-    }
+    headers = {"Authorization": f"Bearer {TBANK_TOKEN}", "Content-Type": "application/json"}
+    payload = {"instrumentId": figi, "from": from_date + "T00:00:00Z", "to": to_date + "T23:59:59Z"}
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10, verify=False)
         if response.status_code == 200:
             data = response.json()
-            # Переводим ответ в удобную таблицу
             coupons = []
             for event in data.get("events", []):
                 amount = float(event["payOneBond"]["units"]) + (float(event["payOneBond"]["nano"]) / 1_000_000_000)
-                coupons.append({
-                    "Дата": event["couponDate"][:10],
-                    "Сумма (₽)": amount,
-                    "Валюта": event["payOneBond"]["currency"]
-                })
-            return pd.DataFrame(coupons)
+                coupons.append({"date": event["couponDate"][:10], "amount": amount})
+            return coupons
         else:
-            st.error(f"Ошибка API: {response.status_code}. Проверьте токен.")
-            return pd.DataFrame()
+            st.error(f"Ошибка API: {response.status_code}")
+            return []
     except Exception as e:
         st.error(f"Ошибка соединения: {e}")
-        return pd.DataFrame()
+        return []
 
 # ==========================================
 # БОКОВАЯ ПАНЕЛЬ (Управление)
@@ -132,33 +121,61 @@ with st.sidebar:
             st.success(f"Удален: {account_to_delete}")
             st.rerun()
     # Вкладка 4: Купоны из API
-    with tab4:
-        st.write("Получение графика купонов напрямую из Т-Инвестиций.")
-        
-        if not TBANK_TOKEN:
-            st.warning("⚠️ Токен не найден. Добавьте файл `.streamlit/secrets.toml` и вставьте туда токен.")
-        else:
-            # ВАЖНО: Сюда нужно вписать FIGI ваших облигаций. 
-            # Пример: FIGI ОФЗ или корпоративной облигации
-            figi_input = st.text_input("Введите FIGI облигации (например, TCSTRP1072)", value="TCSTRP1072")
-            
-            if st.button("Загрузить купоны"):
-                today = datetime.date.today().strftime("%Y-%m-%d")
-                next_year = (datetime.date.today() + datetime.timedelta(days=365)).strftime("%Y-%m-%d")
-                
-                with st.spinner("Запрашиваем данные у брокера..."):
-                    coupons_df = get_coupons_for_bond(figi_input, today, next_year)
-                    
-                if not coupons_df.empty:
-                    st.success(f"Найдено {len(coupons_df)} выплат")
-                    st.dataframe(coupons_df, use_container_width=True)
-                    
-                    # График купонов
-                    fig_coupons = px.bar(coupons_df, x="Дата", y="Сумма (₽)", title="График купонных выплат")
-                    st.plotly_chart(fig_coupons, use_container_width=True)
-                else:
-                    st.info("По этой бумаге нет данных или FIGI введен неверно.")
+with tab4:
+    st.write("Получение графика купонов напрямую из Т-Инвестиций.")
 
+    if not TBANK_TOKEN:
+        st.warning("⚠️ Токен не найден. Добавьте файл `.streamlit/secrets.toml` и вставьте туда токен.")
+        # ВАЖНО: Сюда нужно вписать FIGI ваших облигаций.
+        # Пример: FIGI ОФЗ или корпоративной облигации
+
+    st.write("Купоны по облигациям из вашего портфеля")
+    
+    if st.button("Загрузить календарь купонов"):
+        with st.spinner("Запрашиваем портфель и купоны..."):
+            # 1. Получаем список счетов
+            url_acc = "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.UsersService/GetAccounts"
+            resp_acc = requests.post(url_acc, headers={"Authorization": f"Bearer {TBANK_TOKEN}"}, json={}, verify=False)
+            
+            all_events = []
+            if resp_acc.status_code == 200:
+                accounts = resp_acc.json().get("accounts", [])
+                # Берем первый счет (или можно пройтись по всем)
+                if accounts:
+                    acc_id = accounts[0]["id"]
+                    
+                    # 2. Получаем портфель по этому счету
+                    url_port = "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.OperationsService/GetPortfolio"
+                    resp_port = requests.post(url_port, headers={"Authorization": f"Bearer {TBANK_TOKEN}"}, json={"accountId": acc_id}, verify=False)
+                    
+                    if resp_port.status_code == 200:
+                        positions = resp_port.json().get("positions", [])
+                        # 3. Фильтруем только облигации
+                        for pos in positions:
+                            if pos.get("instrumentType") == "bond":
+                                figi = pos["figi"]
+                                name = pos.get("ticker", figi)
+                                # Запрашиваем купоны на ближайший год
+                                today = datetime.date.today().strftime("%Y-%m-%d")
+                                next_year = (datetime.date.today() + datetime.timedelta(days=365)).strftime("%Y-%m-%d")
+                                coupons = get_coupons_for_bond(figi, today, next_year)
+                                for c in coupons:
+                                    all_events.append({
+                                        "title": f"{name}: {c['amount']:.2f} ₽",
+                                        "start": c["date"],
+                                        "allDay": True
+                                    })
+            
+            # 4. Рисуем календарь
+            if all_events:
+                calendar_options = {
+                    "initialView": "dayGridMonth",
+                    "locale": "ru",
+                    "headerToolbar": {"left": "prev,next today", "center": "title", "right": "dayGridMonth,listMonth"}
+                }
+                calendar(events=all_events, options=calendar_options, key="coupon_calendar")
+            else:
+                st.info("Не найдено облигаций в портфеле или нет данных по купонам.")
             
 # ==========================================
 # ОСНОВНОЙ ЭКРАН
