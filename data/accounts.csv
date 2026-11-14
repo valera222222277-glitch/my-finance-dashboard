@@ -1,16 +1,7 @@
-<<<<<<< HEAD
 group,name,balance,currency,works_for_income
 Накопительные счета,Ozon Bank,71000,RUB,TRUE
 Вклады,Credit club,100000,RUB,TRUE
 Вклады,Т-Банк,117226,RUB,TRUE
 Брокерские счета,Т-Банк Пассивный доход,4363466,RUB,TRUE
 Брокерские счета,Т-Банк Рост,31686,RUB,FALSE
-=======
-group,name,balance,currency,works_for_income
-Накопительные счета,Ozon Bank,71000,RUB,TRUE
-Вклады,Credit club,100000,RUB,TRUE
-Вклады,Т-Банк,117226,RUB,TRUE
-Брокерские счета,Т-Банк Пассивный доход,4363466,RUB,TRUE
-Брокерские счета,Т-Банк Рост,31686,RUB,FALSE
->>>>>>> 7bc0b050035a6f00f6ef490af53ab87bb72248ae
 Криптовалюта,Стоимость монет,848780,RUB,TRUE
