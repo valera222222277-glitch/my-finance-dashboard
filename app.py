@@ -8,6 +8,8 @@ import pandas as pd
 import plotly.express as px
 import requests
 import datetime # <--- ДОБАВИТЬ ЭТО
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- Настройка страницы ---
 st.set_page_config(page_title="Мой Капитал", layout="wide", page_icon="💰")
@@ -55,7 +57,7 @@ def get_coupons_for_bond(figi, from_date, to_date):
         "to": to_date + "T23:59:59Z"
     }
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response = requests.post(url, headers=headers, json=payload, timeout=10, verify=False)
         if response.status_code == 200:
             data = response.json()
             # Переводим ответ в удобную таблицу
@@ -156,7 +158,8 @@ with st.sidebar:
                     st.plotly_chart(fig_coupons, use_container_width=True)
                 else:
                     st.info("По этой бумаге нет данных или FIGI введен неверно.")
-                    
+
+            
 # ==========================================
 # ОСНОВНОЙ ЭКРАН
 # ==========================================
