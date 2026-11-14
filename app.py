@@ -3,6 +3,11 @@ import pandas as pd
 import plotly.express as px
 import requests
 import os
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import requests
+import datetime # <--- ДОБАВИТЬ ЭТО
 
 # --- Настройка страницы ---
 st.set_page_config(page_title="Мой Капитал", layout="wide", page_icon="💰")
@@ -28,6 +33,47 @@ def save_data(df):
 
 accounts_df, history_df = load_data()
 usd_rate = get_usd_rate()
+# ==========================================
+# ИНТЕГРАЦИЯ С Т-ИНВЕСТИЦИЯМИ
+# ==========================================
+# Безопасно достаем токен
+try:
+    TBANK_TOKEN = st.secrets["TBANK_TOKEN"]
+except:
+    TBANK_TOKEN = None
+
+def get_coupons_for_bond(figi, from_date, to_date):
+    """Запрашивает купоны по облигации через API Т-Банка"""
+    url = "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondCoupons"
+    headers = {
+        "Authorization": f"Bearer {TBANK_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "instrumentId": figi,
+        "from": from_date + "T00:00:00Z",
+        "to": to_date + "T23:59:59Z"
+    }
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            # Переводим ответ в удобную таблицу
+            coupons = []
+            for event in data.get("events", []):
+                amount = float(event["payOneBond"]["units"]) + (float(event["payOneBond"]["nano"]) / 1_000_000_000)
+                coupons.append({
+                    "Дата": event["couponDate"][:10],
+                    "Сумма (₽)": amount,
+                    "Валюта": event["payOneBond"]["currency"]
+                })
+            return pd.DataFrame(coupons)
+        else:
+            st.error(f"Ошибка API: {response.status_code}. Проверьте токен.")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Ошибка соединения: {e}")
+        return pd.DataFrame()
 
 # ==========================================
 # БОКОВАЯ ПАНЕЛЬ (Управление)
@@ -36,7 +82,7 @@ with st.sidebar:
     st.header("⚙️ Управление счетами")
     
     # Создаем три вкладки в сайдбаре
-    tab1, tab2, tab3 = st.tabs(["➕ Добавить", "✏️ Изменить", "🗑️ Удалить"])
+    tab1, tab2, tab3, tab4 = st.tabs(["➕ Добавить", "✏️ Изменить", "🗑️ Удалить", "📈 Купоны"])
     
     # Вкладка 1: Добавление
     with tab1:
@@ -83,7 +129,34 @@ with st.sidebar:
             save_data(accounts_df)
             st.success(f"Удален: {account_to_delete}")
             st.rerun()
-
+    # Вкладка 4: Купоны из API
+    with tab4:
+        st.write("Получение графика купонов напрямую из Т-Инвестиций.")
+        
+        if not TBANK_TOKEN:
+            st.warning("⚠️ Токен не найден. Добавьте файл `.streamlit/secrets.toml` и вставьте туда токен.")
+        else:
+            # ВАЖНО: Сюда нужно вписать FIGI ваших облигаций. 
+            # Пример: FIGI ОФЗ или корпоративной облигации
+            figi_input = st.text_input("Введите FIGI облигации (например, TCSTRP1072)", value="TCSTRP1072")
+            
+            if st.button("Загрузить купоны"):
+                today = datetime.date.today().strftime("%Y-%m-%d")
+                next_year = (datetime.date.today() + datetime.timedelta(days=365)).strftime("%Y-%m-%d")
+                
+                with st.spinner("Запрашиваем данные у брокера..."):
+                    coupons_df = get_coupons_for_bond(figi_input, today, next_year)
+                    
+                if not coupons_df.empty:
+                    st.success(f"Найдено {len(coupons_df)} выплат")
+                    st.dataframe(coupons_df, use_container_width=True)
+                    
+                    # График купонов
+                    fig_coupons = px.bar(coupons_df, x="Дата", y="Сумма (₽)", title="График купонных выплат")
+                    st.plotly_chart(fig_coupons, use_container_width=True)
+                else:
+                    st.info("По этой бумаге нет данных или FIGI введен неверно.")
+                    
 # ==========================================
 # ОСНОВНОЙ ЭКРАН
 # ==========================================
