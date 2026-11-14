@@ -2,3 +2,4 @@ streamlit
 pandas
 plotly
 requests
+pip install streamlit-calendar
