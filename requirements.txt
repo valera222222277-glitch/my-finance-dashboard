@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 streamlit
 pandas
 plotly
+=======
+streamlit
+pandas
+plotly
+>>>>>>> 7bc0b050035a6f00f6ef490af53ab87bb72248ae
 requests
