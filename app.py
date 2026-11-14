@@ -93,7 +93,61 @@ def fetch_all_coupons():
     except Exception as e:
         st.error(f"Ошибка загрузки купонов: {e}")
     return all_events
+def get_dividends_for_share(figi, from_date, to_date):
+    url = "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService/GetDividends"
+    headers = {"Authorization": f"Bearer {TBANK_TOKEN}", "Content-Type": "application/json"}
+    payload = {"instrumentId": figi, "from": from_date + "T00:00:00Z", "to": to_date + "T23:59:59Z"}
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10, verify=False)
+        if response.status_code == 200:
+            data = response.json()
+            dividends = []
+            for div in data.get("dividends", []):
+                # Сумма на одну акцию
+                amount = float(div["dividendNet"]["units"]) + (float(div["dividendNet"]["nano"]) / 1_000_000_000)
+                # Берем дату выплаты (paymentDate), если ее нет — дату фиксации (recordDate)
+                pay_date = div.get("paymentDate") or div.get("recordDate")
+                if pay_date:
+                    dividends.append({"date": pay_date[:10], "amount": amount})
+            return dividends
+        else:
+            return []
+    except Exception as e:
+        return []
 
+def fetch_all_dividends():
+    if not TBANK_TOKEN: return []
+    all_events = []
+    try:
+        url_acc = "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.UsersService/GetAccounts"
+        resp_acc = requests.post(url_acc, headers={"Authorization": f"Bearer {TBANK_TOKEN}"}, json={}, verify=False)
+        
+        if resp_acc.status_code == 200:
+            accounts = resp_acc.json().get("accounts", [])
+            if accounts:
+                acc_id = accounts[0]["id"]
+                url_port = "https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.OperationsService/GetPortfolio"
+                resp_port = requests.post(url_port, headers={"Authorization": f"Bearer {TBANK_TOKEN}"}, json={"accountId": acc_id}, verify=False)
+                
+                if resp_port.status_code == 200:
+                    positions = resp_port.json().get("positions", [])
+                    for pos in positions:
+                        # Ищем именно АКЦИИ (share)
+                        if pos.get("instrumentType") == "share":
+                            figi = pos["figi"]
+                            name = pos.get("ticker", figi)
+                            today = datetime.date.today().strftime("%Y-%m-%d")
+                            next_year = (datetime.date.today() + datetime.timedelta(days=365)).strftime("%Y-%m-%d")
+                            divs = get_dividends_for_share(figi, today, next_year)
+                            for d in divs:
+                                all_events.append({
+                                    "title": f"{name}: {d['amount']:.2f} ₽",
+                                    "start": d["date"],
+                                    "allDay": True
+                                })
+    except Exception as e:
+        st.error(f"Ошибка загрузки дивидендов: {e}")
+    return all_events
 # ==========================================
 # БОКОВАЯ ПАНЕЛЬ (Управление счетами)
 # ==========================================
@@ -197,8 +251,22 @@ with tab_overview:
 
 # --- ВКЛАДКА 2: ДИВИДЕНДЫ (Заглушка для красоты) ---
 with tab_dividends:
-    st.subheader("Дивиденды")
-    st.info("Этот раздел находится в разработке. Скоро здесь появится календарь дивидендов по акциям из вашего портфеля.")
+    st.subheader("Календарь дивидендов")
+    if st.button("🔄 Обновить дивиденды", key="refresh_dividends", use_container_width=True):
+        st.session_state['dividends_data'] = fetch_all_dividends()
+    
+    if 'dividends_data' not in st.session_state:
+        st.session_state['dividends_data'] = []
+        
+    if st.session_state['dividends_data']:
+        calendar_options = {
+            "initialView": "dayGridMonth",
+            "locale": "ru",
+            "headerToolbar": {"left": "prev,next today", "center": "title", "right": "dayGridMonth,listMonth"}
+        }
+        calendar(events=st.session_state['dividends_data'], options=calendar_options, key="main_dividends_calendar")
+    else:
+        st.info("Нажмите кнопку 'Обновить дивиденды', чтобы загрузить данные по акциям из вашего портфеля.")
 
 # --- ВКЛАДКА 3: КУПОНЫ (ТОТ САМЫЙ КАЛЕНДАРЬ) ---
 with tab_coupons:
