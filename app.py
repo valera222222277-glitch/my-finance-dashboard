@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import requests
+import os
 
 # --- Настройка страницы ---
 st.set_page_config(page_title="Мой Капитал", layout="wide", page_icon="💰")
@@ -23,66 +24,68 @@ def load_data():
     return accounts, history
 
 def save_data(df):
-    # Сохраняем обновленный датафрейм обратно в CSV
     df.to_csv("data/accounts.csv", index=False)
 
 accounts_df, history_df = load_data()
 usd_rate = get_usd_rate()
 
 # ==========================================
-# БОКОВАЯ ПАНЕЛЬ (Sidebar) ДЛЯ РЕДАКТИРОВАНИЯ
+# БОКОВАЯ ПАНЕЛЬ (Управление)
 # ==========================================
 with st.sidebar:
     st.header("⚙️ Управление счетами")
     
-    # 1. Форма для изменения существующего счета
-    with st.form("edit_account_form"):
-        st.subheader("Изменить баланс")
-        # Выпадающий список всех счетов
-        account_to_edit = st.selectbox("Выберите счет", accounts_df["name"].tolist())
-        # Находим текущий баланс для выбранного счета
-        current_balance = accounts_df[accounts_df["name"] == account_to_edit]["balance"].values[0]
-        # Поле ввода новой суммы
-        new_balance = st.number_input("Новый баланс (₽)", value=float(current_balance), step=1000.0)
-        
-        if st.form_submit_button("Обновить счет"):
-            # Меняем значение в датафрейме
-            accounts_df.loc[accounts_df["name"] == account_to_edit, "balance"] = new_balance
-            # Сохраняем в файл
-            save_data(accounts_df)
-            st.success(f"Счет '{account_to_edit}' обновлен!")
-            st.rerun() # Перезагружаем страницу, чтобы увидеть новые цифры
+    # Создаем три вкладки в сайдбаре
+    tab1, tab2, tab3 = st.tabs(["➕ Добавить", "✏️ Изменить", "🗑️ Удалить"])
+    
+    # Вкладка 1: Добавление
+    with tab1:
+        with st.form("add_account_form"):
+            new_name = st.text_input("Название счета")
+            new_group = st.selectbox("Группа", ["Накопительные счета", "Вклады", "Брокерские счета", "Криптовалюта"])
+            new_bal = st.number_input("Сумма (₽)", step=1000.0, value=0.0)
+            new_works = st.checkbox("Приносит доход (%)", value=True)
+            
+            if st.form_submit_button("Создать"):
+                if new_name:
+                    new_row = pd.DataFrame([{
+                        "group": new_group, "name": new_name, "balance": new_bal, 
+                        "currency": "RUB", "works_for_income": new_works
+                    }])
+                    accounts_df = pd.concat([accounts_df, new_row], ignore_index=True)
+                    save_data(accounts_df)
+                    st.success(f"Добавлен: {new_name}")
+                    st.rerun()
+                else:
+                    st.error("Введите название!")
 
-    st.divider()
-
-    # 2. Форма для добавления нового счета
-    with st.form("add_account_form"):
-        st.subheader("Добавить новый счет")
-        new_name = st.text_input("Название (например, Альфа-Банк)")
-        new_group = st.selectbox("Группа", ["Накопительные счета", "Вклады", "Брокерские счета", "Криптовалюта"])
-        new_bal = st.number_input("Сумма (₽)", step=1000.0, value=0.0)
-        new_works = st.checkbox("Приносит доход (%)", value=True)
-        
-        if st.form_submit_button("Создать счет"):
-            if new_name:
-                # Создаем новую строку
-                new_row = pd.DataFrame([{
-                    "group": new_group, 
-                    "name": new_name, 
-                    "balance": new_bal, 
-                    "currency": "RUB", 
-                    "works_for_income": new_works
-                }])
-                # Добавляем к старому датафрейму
-                accounts_df = pd.concat([accounts_df, new_row], ignore_index=True)
+    # Вкладка 2: Изменение баланса
+    with tab2:
+        with st.form("edit_account_form"):
+            account_to_edit = st.selectbox("Выберите счет", accounts_df["name"].tolist())
+            current_balance = accounts_df[accounts_df["name"] == account_to_edit]["balance"].values[0]
+            new_balance = st.number_input("Новый баланс (₽)", value=float(current_balance), step=1000.0)
+            
+            if st.form_submit_button("Обновить"):
+                accounts_df.loc[accounts_df["name"] == account_to_edit, "balance"] = new_balance
                 save_data(accounts_df)
-                st.success(f"Счет '{new_name}' добавлен!")
+                st.success(f"Обновлен: {account_to_edit}")
                 st.rerun()
-            else:
-                st.error("Введите название счета!")
+
+    # Вкладка 3: Удаление счета
+    with tab3:
+        st.write("Удаление счета из списка.")
+        account_to_delete = st.selectbox("Кого удаляем?", accounts_df["name"].tolist(), key="del_select")
+        
+        if st.button("🗑️ Удалить счет", type="primary"):
+            # Фильтруем датафрейм, оставляя всех, кроме выбранного
+            accounts_df = accounts_df[accounts_df["name"] != account_to_delete]
+            save_data(accounts_df)
+            st.success(f"Удален: {account_to_delete}")
+            st.rerun()
 
 # ==========================================
-# ОСНОВНОЙ ЭКРАН (Дашборд)
+# ОСНОВНОЙ ЭКРАН
 # ==========================================
 total_capital = accounts_df["balance"].sum()
 capital_in_usd = total_capital / usd_rate
